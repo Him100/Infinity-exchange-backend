@@ -4,12 +4,18 @@ import com.infinityexchange.infinityExchange.dto.AuthResponse;
 import com.infinityexchange.infinityExchange.dto.ChangePasswordRequest;
 import com.infinityexchange.infinityExchange.dto.LoginRequest;
 import com.infinityexchange.infinityExchange.dto.OtpRequest;
+import com.infinityexchange.infinityExchange.entity.TokenBlacklist;
 import com.infinityexchange.infinityExchange.entity.User;
 import com.infinityexchange.infinityExchange.entity.UserRole;
+import com.infinityexchange.infinityExchange.repository.TokenBlacklistRepository;
 import com.infinityexchange.infinityExchange.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 @Service
@@ -18,6 +24,7 @@ public class AuthService {
 
     private final UserRepository userRepository;
     private final JwtService jwtService;
+    private final TokenBlacklistRepository tokenBlacklistRepository;
 
     public AuthResponse verifyCredentials(LoginRequest request) {
         String userId = request.getUserId();
@@ -37,21 +44,7 @@ public class AuthService {
 
         User user = userOpt.get();
 
-        // // Debug logging for troubleshooting
-        // System.out.println("=== CREDENTIALS VERIFICATION DEBUG ===");
-        // System.out.println("Input userId: '" + userId + "'");
-        // System.out.println("Found user: " + user.getUsername() + " (ID: " + user.getId() + ")");
-        // System.out.println("User role: " + user.getRole());
-        // System.out.println("User email: " + user.getEmail());
-        // System.out.println("User active: " + user.getIsActive());
-        // System.out.println("Stored OTP: '" + user.getOtp() + "'");
-        // System.out.println("Input password: " + password);
-        // System.out.println("Stored password: " + user.getPassword());
-        // System.out.println("Passwords match: " + password.equals(user.getPassword()));
-        // System.out.println("=====================================");
-
         if (!password.equals(user.getPassword())) {
-            System.out.println("DEBUG: Password verification failed");
             return AuthResponse.builder()
                     .error("Invalid credentials")
                     .build();
@@ -59,7 +52,6 @@ public class AuthService {
 
         // Check if user is active
         if (!user.getIsActive()) {
-            System.out.println("DEBUG: User account is disabled");
             return AuthResponse.builder()
                     .error("Account is disabled")
                     .build();
@@ -112,21 +104,8 @@ public class AuthService {
                     .build();
         }
 
-        // // Debug logging for OTP verification
-        // System.out.println("=== OTP VERIFICATION DEBUG ===");
-        // System.out.println("Input userId: '" + userId + "'");
-        // System.out.println("Found user: " + user.getUsername() + " (ID: " + user.getId() + ")");
-        // System.out.println("User role: " + user.getRole());
-        // System.out.println("Stored OTP: '" + user.getOtp() + "'");
-        // System.out.println("Input OTP: '" + otp + "'");
-        // System.out.println("OTP is null: " + (user.getOtp() == null));
-        // System.out.println("OTP is empty: " + (user.getOtp() != null && user.getOtp().isEmpty()));
-        // System.out.println("OTP length: " + (user.getOtp() != null ? user.getOtp().length() : "N/A"));
-        // System.out.println("==============================");
-
         // Check if user has OTP in database
         if (user.getOtp() == null || user.getOtp().isEmpty()) {
-            System.out.println("DEBUG: No OTP found in database - returning error");
             return AuthResponse.builder()
                     .error("No OTP found. Please contact administrator.")
                     .build();
@@ -134,7 +113,6 @@ public class AuthService {
 
         // Verify OTP matches
         if (user.getOtp().equals(otp)) {
-            System.out.println("DEBUG: OTP matches - login successful");
             // OTP is kept for reuse (not cleared)
 
             String token = jwtService.generateToken(
@@ -151,7 +129,6 @@ public class AuthService {
                     .build();
         }
 
-        System.out.println("DEBUG: OTP does not match - returning invalid OTP error");
         return AuthResponse.builder()
                 .error("Invalid OTP")
                 .build();
@@ -202,13 +179,9 @@ public class AuthService {
         try {
             userRepository.save(user);
             userRepository.flush();
-
-            System.out.println("DEBUG: Password updated successfully for user: " + username);
         } catch (Exception e) {
-            System.out.println("DEBUG: Error saving user to database: " + e.getMessage());
-            e.printStackTrace();
             return AuthResponse.builder()
-                    .error("Failed to update password in database: " + e.getMessage())
+                    .error("Failed to update password in database")
                     .build();
         }
 
@@ -220,5 +193,66 @@ public class AuthService {
     public User getCurrentUser(String username) {
         Optional<User> userOpt = userRepository.findByUsername(username);
         return userOpt.orElse(null);
+    }
+
+    public AuthResponse logout(String token) {
+        try {
+            LocalDateTime expiresAt = null;
+            Long userId = null;
+
+            // Try to extract token information, but don't fail if token is invalid
+            try {
+                io.jsonwebtoken.Claims claims = jwtService.validateToken(token);
+                expiresAt = claims.getExpiration().toInstant()
+                        .atZone(java.time.ZoneId.systemDefault())
+                        .toLocalDateTime();
+                userId = jwtService.extractUserId(token);
+            } catch (Exception e) {
+                // If token is invalid, still allow logout but with current timestamp
+                expiresAt = LocalDateTime.now().plusHours(1); // Default expiry
+                userId = null; // We don't know the user ID
+            }
+
+            // Generate hash of the token (SHA-256) - much shorter than full token
+            String tokenHash = hashToken(token);
+
+            // Create blacklist entry with token hash instead of full token
+            TokenBlacklist blacklistEntry = TokenBlacklist.builder()
+                    .token(tokenHash) // Store hash instead of full token
+                    .expiresAt(expiresAt)
+                    .userId(userId)
+                    .reason("User logout")
+                    .build();
+
+            tokenBlacklistRepository.save(blacklistEntry);
+
+            return AuthResponse.builder()
+                    .message("Logout successful")
+                    .build();
+        } catch (Exception e) {
+            return AuthResponse.builder()
+                    .error("Logout failed: " + e.getMessage())
+                    .build();
+        }
+    }
+
+    private String hashToken(String token) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hashBytes = digest.digest(token.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hexString = new StringBuilder();
+
+            for (byte b : hashBytes) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1) {
+                    hexString.append('0');
+                }
+                hexString.append(hex);
+            }
+
+            return hexString.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 algorithm not available", e);
+        }
     }
 }

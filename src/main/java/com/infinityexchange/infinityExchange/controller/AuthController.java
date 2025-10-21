@@ -5,6 +5,7 @@ import com.infinityexchange.infinityExchange.dto.ChangePasswordRequest;
 import com.infinityexchange.infinityExchange.dto.LoginRequest;
 import com.infinityexchange.infinityExchange.dto.OtpRequest;
 import com.infinityexchange.infinityExchange.service.AuthService;
+import com.infinityexchange.infinityExchange.service.JwtService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -16,12 +17,13 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
 @CrossOrigin(
-    origins = {"http://localhost:5173", "http://localhost:3000", "http://localhost:4173", "http://localhost:8080"},
+    origins = {"http://localhost:5173", "http://localhost:3000", "http://localhost:4173", "http://localhost:8080", "http://localhost:8085", "http://192.168.43.33:8080", "http://127.0.0.1:5173", "http://127.0.0.1:3000"},
     allowCredentials = "true"
 )
 public class AuthController {
 
     private final AuthService authService;
+    private final JwtService jwtService;
 
     @PostMapping("/verify-credentials")
     public ResponseEntity<AuthResponse> verifyCredentials(@RequestBody LoginRequest request) {
@@ -98,6 +100,25 @@ public class AuthController {
         return ResponseEntity.ok(response);
     }
 
+    @PostMapping("/logout")
+    public ResponseEntity<AuthResponse> logout(@RequestHeader("Authorization") String authHeader) {
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            return ResponseEntity.badRequest().body(
+                AuthResponse.builder()
+                    .error("Invalid or missing Authorization header")
+                    .build()
+            );
+        }
 
+        String token = authHeader.substring(7); // Remove "Bearer " prefix
+
+        // AuthService.logout() handles invalid tokens gracefully
+        // No need to validate token here since logout should work even for expired tokens
+        AuthResponse response = authService.logout(token);
+        if (response.getError() != null) {
+            return ResponseEntity.badRequest().body(response);
+        }
+        return ResponseEntity.ok(response);
+    }
 
 }

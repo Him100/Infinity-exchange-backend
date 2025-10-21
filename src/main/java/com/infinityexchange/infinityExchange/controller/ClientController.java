@@ -11,7 +11,10 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/client")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:8080")
+@CrossOrigin(
+    origins = {"http://localhost:5173", "http://localhost:3000", "http://localhost:4173", "http://localhost:8080", "http://localhost:8085", "http://192.168.43.33:8080"},
+    allowCredentials = "true"
+)
 @PreAuthorize("hasRole('CLIENT')")
 public class ClientController {
     @GetMapping("/dashboard")

@@ -12,10 +12,11 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.AuthenticationEntryPoint;
 
 import java.util.Arrays;
 
@@ -28,6 +29,7 @@ public class SecurityConfig {
     // private final JwtAuthenticationFilter jwtAuthFilter; // Commented out for now
     private final UserDetailsService userDetailsService;
     private final JwtAuthenticationFilter jwtAuthFilter;
+    private final CustomAuthenticationEntryPoint customAuthenticationEntryPoint;
 
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
@@ -49,6 +51,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/public/**").permitAll()
                 .anyRequest().authenticated()
             )
+            .exceptionHandling(ex -> ex.authenticationEntryPoint(customAuthenticationEntryPoint))
             .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authenticationProvider(authProvider)
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
@@ -64,8 +67,9 @@ public class SecurityConfig {
             "http://localhost:5173",    // Vite dev server
             "http://localhost:3000",    // React dev server
             "http://localhost:4173",     // Vite preview
-            "http://localhost:8080"     // Vite preview
-
+            "http://localhost:8080",     // Vite preview
+            "http://localhost:8085",     // Backend server
+            "http://192.168.43.33:8080" // Frontend network IP
         ));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("*"));
